@@ -110,7 +110,7 @@ abort_argument_value <- function(arg, valid_values) {
 #' @param data A data frame.
 #' @param col_name A character vector with the column name.
 #'
-#' @return Returns an error condition of class{error_column_not_found}.
+#' @return Returns an error condition of class `error_column_not_found`.
 #'
 #' @export
 #'
@@ -137,7 +137,7 @@ abort_column_not_found <- function(data, col_name) {
 #' @param ... Extra message to be added to the error message. Must be
 #'   character string.
 #'
-#' @return Returns an error condition of class{error_no_method_for_class}.
+#' @return Returns an error condition of class `error_no_method_for_class`.
 #'
 #' @export
 #'
@@ -151,12 +151,17 @@ abort_no_method_for_class <- function(fun, class, ...) {
   extra_msg <- list(...)
   if (any(purrr::map(extra_msg, is.character) == FALSE)) {
     abort_argument_type("...", must = "be character", not = ...)
-  } else {
-    extra_msg <- glue::glue_collapse(extra_msg, sep = "\n")
   }
+
+  if (length(extra_msg) > 0) {
+    extra_msg <- glue::glue_collapse(extra_msg, sep = "\n")
+  } else {
+    extra_msg <- character()
+  }
+
   if (length(class) > 1) {
     class <- glue::glue_collapse(
-     glue::glue("`{class}`"), sep = ", ", last = " and "
+      glue::glue("`{class}`"), sep = ", ", last = " and "
     )
     noun <- "classes"
   } else {
@@ -180,7 +185,7 @@ abort_no_method_for_class <- function(fun, class, ...) {
 #'
 #' @param package A character string with the required package name.
 #'
-#' @return Returns an error condition of class{error_package_not_installed}.
+#' @return Returns an error condition of class `error_package_not_installed`.
 #'
 #' @export
 #'

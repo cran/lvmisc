@@ -12,7 +12,7 @@ abort_column_not_found(data, col_name)
 \item{col_name}{A character vector with the column name.}
 }
 \value{
-Returns an error condition of class{error_column_not_found}.
+Returns an error condition of class \code{error_column_not_found}.
 }
 \description{
 Creates a custom error condition created with

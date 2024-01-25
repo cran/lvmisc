@@ -15,7 +15,7 @@ abort_no_method_for_class(fun, class, ...)
 character string.}
 }
 \value{
-Returns an error condition of class{error_no_method_for_class}.
+Returns an error condition of class \code{error_no_method_for_class}.
 }
 \description{
 Creates a custom error condition created with

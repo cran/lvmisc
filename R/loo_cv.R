@@ -56,13 +56,19 @@ loo_cv.lm <- function(model, data, id, keep = "all") {
   cv_values <- compute_cv_values(
     data, id_col_name, splits$testing_data, trained_models, outcome
   )
-  get_lvmisc_cv_object(cv_values, model, id_col_name, keep)
+  get_lvmisc_cv_object(cv_values, model, trained_models, id_col_name, keep)
 }
 
 #' @rdname loo_cv
 #' @export
 loo_cv.lmerMod <- function(model, data, id, keep = "all") {
-  requireNamespace("lme4", quietly = TRUE)
+  use_lmerTest <- inherits(model, "lmerModLmerTest")
+  if (isTRUE(use_lmerTest)) {
+    requireNamespace("lmerTest", quietly = TRUE)
+  } else {
+    requireNamespace("lme4", quietly = TRUE)
+  }
+
   id_col_name <- rlang::as_string(rlang::ensym(id))
   data_name <- rlang::as_string(rlang::ensym(data))
   check_args_loo_cv(model, data, id, keep, id_col_name, data_name)
@@ -72,17 +78,59 @@ loo_cv.lmerMod <- function(model, data, id, keep = "all") {
   outcome <- as.character(rlang::f_lhs(formula))
 
   splits <- split_data(data, id_col_name)
-  trained_models <- purrr::map(
-    splits$training_data,
-    ~ lme4::lmer(
-      formula, data = .x,
-      REML = grepl("REML", summary(model)$methTitle)
+  if (use_lmerTest) {
+    trained_models <- purrr::map(
+      splits$training_data,
+      ~ lmerTest::lmer(
+        formula, data = .x,
+        REML = grepl("REML", summary(model)$methTitle)
+      )
     )
-  )
+  } else {
+    trained_models <- purrr::map(
+      splits$training_data,
+      ~ lme4::lmer(
+        formula, data = .x,
+        REML = grepl("REML", summary(model)$methTitle)
+      )
+    )
+  }
   cv_values <- compute_cv_values(
     data, id_col_name, splits$testing_data, trained_models, outcome
   )
-  get_lvmisc_cv_object(cv_values, model, id_col_name, keep)
+  get_lvmisc_cv_object(cv_values, model, trained_models, id_col_name, keep)
+}
+
+#' Extract information from the trained models from a cross-validation
+#'
+#' @param cv An object of class \code{lvmisc_cv}.
+#'
+#' @return \code{get_cv_fixed_eff()} returns a tibble with the estimated
+#'   value for each coefficient of each trained model and its associated
+#'   standard error. \code{get_cv_r2()} returns a tibble with the R squared
+#'   for each of the trained models.
+#'
+#' @export
+get_cv_fixed_eff <- function(cv) {
+  trained_models <- attributes(cv)$trained_models
+  i <- seq_along(trained_models)
+
+  purrr::map_dfr(
+    i, ~ tibble::as_tibble(
+      summary(trained_models[[.x]])$coefficients,
+      rownames = "coefficient_names"
+    )
+  )
+
+  purrr::map_dfr(i, ~ format_fixed_eff(trained_models, .x))
+}
+
+#' @rdname get_cv_fixed_eff
+#' @export
+get_cv_r2 <- function(cv) {
+  trained_models <- attributes(cv)$trained_models
+  i <- seq_along(trained_models)
+  purrr::map_dfr(i, ~ format_r2(trained_models, .x))
 }
 
 check_args_loo_cv <- function(model,
@@ -138,17 +186,48 @@ compute_cv_values <- function(data, id, testing_data, trained_models, outcome) {
   dplyr::arrange(cv_values, id)
 }
 
-get_lvmisc_cv_object <- function(cv_values, model, id, keep) {
+format_fixed_eff <- function(trained_models, i) {
+  fixed_eff <- tibble::as_tibble(
+    summary(trained_models[[i]])$coefficients,
+    rownames = "coefficient_names"
+  )
+  fixed_eff$model_num <- i
+  if ("Pr(>|t|)" %in% names(fixed_eff)) {
+    fixed_eff <- dplyr::select(
+      fixed_eff,
+      .data$model_num, .data$coefficient_names,
+      estimate = .data$Estimate, std_error = .data$`Std. Error`,
+      p_value = .data$`Pr(>|t|)`
+    )
+  } else {
+    fixed_eff <- dplyr::select(
+      fixed_eff,
+      .data$model_num, .data$coefficient_names,
+      estimate = .data$Estimate, std_error = .data$`Std. Error`
+    )
+  }
+  fixed_eff <- dplyr::mutate(fixed_eff, model_num = as.factor(.data$model_num))
+  fixed_eff
+}
+
+format_r2 <- function(trained_models, i) {
+  r2_df <- tibble::as_tibble(r2(trained_models[[i]]))
+  r2_df <- tibble::add_column(r2_df, model_num = i, .before = 1)
+  r2_df <- dplyr::mutate(r2_df, model_num = as.factor(.data$model_num))
+  r2_df
+}
+
+get_lvmisc_cv_object <- function(cv_values, model, trained_models, id, keep) {
   if (keep == "all") {
-    new_lvmisc_cv(cv_values, model)
+    new_lvmisc_cv(cv_values, model, trained_models)
   } else if (keep == "used") {
     vars <- c(
       id,
       ".actual", ".predicted"
     )
-    new_lvmisc_cv(cv_values[vars], model)
+    new_lvmisc_cv(cv_values[vars], model, trained_models)
   } else if (keep == "none") {
-    new_lvmisc_cv(cv_values[c(".actual", ".predicted")], model)
+    new_lvmisc_cv(cv_values[c(".actual", ".predicted")], model, trained_models)
   }
 }
 
@@ -156,13 +235,16 @@ get_lvmisc_cv_object <- function(cv_values, model, id, keep) {
 #'
 #' @param x A data.frame.
 #' @param model An object containing a model.
+#' @param model A list of all trained models.
 #' @keywords internal
-new_lvmisc_cv <- function(x, model) {
+new_lvmisc_cv <- function(x, model, trained_models) {
   stopifnot(is.data.frame(x))
   stopifnot(".actual" %in% names(x))
   stopifnot(".predicted" %in% names(x))
   n_rows <- nrow(x)
   tibble::new_tibble(
-    x, lvmisc_cv_model = model, nrow = n_rows, class = "lvmisc_cv"
+    x,
+    lvmisc_cv_model = model, trained_models = trained_models,
+    nrow = n_rows, class = "lvmisc_cv"
   )
 }

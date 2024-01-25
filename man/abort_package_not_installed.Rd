@@ -10,7 +10,7 @@ abort_package_not_installed(package)
 \item{package}{A character string with the required package name.}
 }
 \value{
-Returns an error condition of class{error_package_not_installed}.
+Returns an error condition of class \code{error_package_not_installed}.
 }
 \description{
 Creates a custom error condition created with
